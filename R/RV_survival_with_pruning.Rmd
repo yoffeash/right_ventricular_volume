@@ -11,7 +11,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning=FALSE, message=FALSE, error = FALSE, echo=FALSE)
+knitr::opts_chunk$set(warning=FALSE, message=FALSE, error = FALSE)
 ```
 
 # Overview
@@ -81,10 +81,11 @@ Note that p value for RV volume alone is `r KMRV.p`
 
 ```{r pruning survival large rv, fig.align='left', fig.height=10, fig.width=10}
 KMPrune.bigRV <- survfit(Surv(days_followed, vital_status) ~ arterial_prune, data=filter(RV_proc,RV_vol==1))
+KMPrune.bigRV.p = as.matrix(surv_pvalue(KMPrune.bigRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
 surv.km.prune.bigRV <- ggsurvplot(KMPrune.bigRV, data=filter(RV_proc,RV_vol==1), risk.table = TRUE, 
                                   pval = TRUE, conf.int = TRUE, 
                                   risk.table.y.text.col = T, risk.table.y.text = TRUE, 
-                            legend = c(0.15,0.32), legend.title="Pruning",
+                            legend = c(0.14,0.35), legend.title="Pruning",
                             legend.labs=c("No Pruning","Pruning"),
                             risk.table.height = 0.2,
                             palette=c("#E7B800", "#2E9FDF"),
@@ -93,7 +94,6 @@ surv.km.prune.bigRV <- ggsurvplot(KMPrune.bigRV, data=filter(RV_proc,RV_vol==1),
                             font.x=c(14), font.y=c(14), font.tickslab=c(14),
                             xlab="Years")
 surv.km.prune.bigRV
-KMPrune.bigRV.p = as.matrix(surv_pvalue(KMPrune.bigRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
 ```
 Note that p value for pruning in those with a large RV is `r KMPrune.bigRV.p`
 
