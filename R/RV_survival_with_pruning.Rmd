@@ -1,0 +1,139 @@
+---
+title: "Right Ventricular Mortality Analysis"
+author: "Samuel Ash"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE, error = FALSE, echo=FALSE)
+```
+
+# Overview
+Kaplan Meier analyes of mortality.
+
+## Load Libraries and Data
+
+## Libraries
+
+```{r load_libs}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(cowplot)
+library(readxl)
+library(naniar)
+```
+
+# Data
+Abbreviated data from GRW dated July 25, 2018.
+
+```{r load data}
+RV_raw = read_excel("../data/RV size by arterial pruning and survival.xlsx")
+```
+
+## Note that in this dataset:
+1) those who are pruned i.e., those with aBV5<median, have arterial_prune=1, and those that are not pruned (aBV5>median) have arterial_prune=0
+2) those that have RV_vol=1 are those with large right ventricles (highest quartile) and those with with RV_vol=0 have small right ventricles
+
+## Data cleaning:
+1) remove all rows with NA
+2) change vital status and days followed to numeric
+
+```{r data cleaning}
+# change . to NA and remove those rows
+RV_proc <- RV_raw %>% na_if(".") %>% na.omit()
+# change days followed and vital status to numeric
+RV_proc$days_followed <- as.numeric(RV_proc$days_followed)
+RV_proc$vital_status <- as.numeric(RV_proc$vital_status)
+```
+
+
+# Analysis
+##Survival
+###Effect of RV size only
+
+```{r rv survival, fig.align='left', fig.height=10, fig.width=10}
+KMRV <- survfit(Surv(days_followed, vital_status) ~ RV_vol, data=RV_proc)
+surv.km.RV <- ggsurvplot(KMRV, data=RV_proc, risk.table = TRUE, pval = TRUE,
+                            conf.int = TRUE, 
+                            risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.22,0.32), legend.title="Right Ventricular Size",
+                            legend.labs=c("Lowest Three Quartiles","Highest Quartile"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Survival by Right Ventricular Size",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+surv.km.RV
+KMRV.p = as.matrix(surv_pvalue(KMRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+```
+
+Note that p value for RV volume alone is `r KMRV.p`
+
+###Effect of pruning in those with big right ventricles
+
+```{r pruning survival large rv, fig.align='left', fig.height=10, fig.width=10}
+KMPrune.bigRV <- survfit(Surv(days_followed, vital_status) ~ arterial_prune, data=filter(RV_proc,RV_vol==1))
+surv.km.prune.bigRV <- ggsurvplot(KMPrune.bigRV, data=filter(RV_proc,RV_vol==1), risk.table = TRUE, 
+                                  pval = TRUE, conf.int = TRUE, 
+                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.15,0.32), legend.title="Pruning",
+                            legend.labs=c("No Pruning","Pruning"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Survival by Pruning in those with Large Right Ventricles",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+surv.km.prune.bigRV
+KMPrune.bigRV.p = as.matrix(surv_pvalue(KMPrune.bigRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+```
+Note that p value for pruning in those with a large RV is `r KMPrune.bigRV.p`
+
+###Effect of right ventricular size in those with and without pruning
+
+```{r rv by pruning survival, fig.align='left', fig.height=10, fig.width=20}
+# in those without pruning
+KMRV.noprune <- survfit(Surv(days_followed, vital_status) ~ RV_vol, data=filter(RV_proc,arterial_prune==0))
+surv.km.RV.noprune <- ggsurvplot(KMRV.noprune, data=filter(RV_proc,arterial_prune==0), 
+                                 risk.table = TRUE, pval = TRUE, conf.int = TRUE, 
+                                 risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.15,0.32), legend.title="Right Ventricular Size",
+                            legend.labs=c("Small Right Ventricle","Large Right Ventricle"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Those without Arterial Pruning",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+KMRV.noprune.p = as.matrix(surv_pvalue(KMRV.noprune, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+
+# in those with purning
+KMRV.prune <- survfit(Surv(days_followed, vital_status) ~ RV_vol, data=filter(RV_proc,arterial_prune==1))
+surv.km.RV.prune <- ggsurvplot(KMRV.prune, data=filter(RV_proc,arterial_prune==1), risk.table = TRUE, 
+                                  pval = TRUE, conf.int = TRUE, 
+                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.15,0.32), legend.title="Right Ventricular Size",
+                            legend.labs=c("Small Right Ventricle","Large Right Ventricle"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Those with Arterial Pruning",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+KMRV.prune.p = as.matrix(surv_pvalue(KMRV.prune, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+
+# plot
+prune.plots <- list(surv.km.RV.noprune, surv.km.RV.prune)
+
+# Arrange multiple ggsurvplots and print the output
+arrange_ggsurvplots(prune.plots, print = TRUE, ncol = 2, nrow = 1)
+```
+Note that p value for right ventricular volume in those without purning is `r KMRV.noprune.p` and in those with pruning is `r KMRV.prune.p`
