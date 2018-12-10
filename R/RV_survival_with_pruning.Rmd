@@ -15,11 +15,21 @@ knitr::opts_chunk$set(warning=FALSE, message=FALSE, error = FALSE)
 ```
 
 # Overview
-Kaplan Meier analyes of mortality.
+Mortality and exacerbation analyses including stratified by right ventricular volume and by arterial pruning.
 
 ## Load Libraries and Data
-
-## Libraries
+### Libraries
+1. tidyverse
+2. survival
+3. survminer
+4. cowplot
+5. readxl
+6. naniar
+7. janitor
+8. kableExtra
+9. broman (with addition of myround2 by Karl Broman) 
+10. pscl
+11. MASS
 
 ```{r load_libs}
 library(tidyverse)
@@ -28,38 +38,163 @@ library(survminer)
 library(cowplot)
 library(readxl)
 library(naniar)
+library(janitor)
+library(kableExtra)
+library(broman)
+library(pscl)
+library(MASS)
 ```
 
-# Data
-Abbreviated data from GRW dated July 25, 2018.
+```{r}
+myround2 <- function(x, digits = 3){
+  if (x < 10^-digits) return(paste('<', 10^-digits))
+  paste('=', myround(x, digits))
+}
+```
+
+### Data
+1. Abbreviated RV, pruning and mortality data from GRW dated July 25, 2018.
+2. COPDGene clinical data from October 2017
+3. COPGene LFU from July 2018
 
 ```{r load data}
 RV_raw = read_excel("../data/RV size by arterial pruning and survival.xlsx")
+clinical_data_pre <- read_delim("../data/COPDGene_P1P2_All_Visit_09OCT17.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
 ```
 
-## Note that in this dataset:
-1) those who are pruned i.e., those with aBV5<median, have arterial_prune=1, and those that are not pruned (aBV5>median) have arterial_prune=0
-2) those that have RV_vol=1 are those with large right ventricles (highest quartile) and those with with RV_vol=0 have small right ventricles
+### Additional Notes regarding these datasets
+1. Those who are pruned (those with aBV5 < median) have arterial_prune=1 and those that are not pruned (aBV5 > median) have arterial_prune=0
+2. Those that have RV_vol=1 are those with large right ventricles (highest quartile) and those with with RV_vol=0 have small right ventricles
 
-## Data cleaning:
-1) remove all rows with NA
-2) change vital status and days followed to numeric
+### Data cleaning:
+1. Remove all rows with NA
+2. Change vital status and days followed to numeric
+3. Merge with clinical data
+4. Merge with LFU
 
 ```{r data cleaning}
 # change . to NA and remove those rows
 RV_proc <- RV_raw %>% na_if(".") %>% na.omit()
 # change days followed and vital status to numeric
 RV_proc$days_followed <- as.numeric(RV_proc$days_followed)
+RV_proc$years_mortality <- RV_proc$days_followed/365
 RV_proc$vital_status <- as.numeric(RV_proc$vital_status)
-```
 
+# clinical dataset
+clinical_data_pre1 <- clean_names(clinical_data_pre)
+clinical_data_pre2 <- clinical_data_pre1 %>% 
+  filter(visitnum==1) %>% 
+  dplyr::select(sid,age_enroll,gender,race,bmi,fev1pp_utah,pct_emph_slicer,ccenter,smok_cig_now,ats_pack_years,exacerbation_frequency,sgrq_score_total,gastro_esoph_reflx) %>% 
+  mutate(priorexacerbation = ifelse(exacerbation_frequency > 0, 1, 0))
+
+RV_clin <- inner_join(RV_proc,clinical_data_pre2)
+
+# LFU
+lfu_pre1 <- read_delim("../data/LFU_SidLevel_w_Comorbid_31JUL18.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
+lfu_pre2 <- clean_names(lfu_pre1)
+
+rv_clin_lfu <- inner_join(RV_clin,lfu_pre2,by="sid")
+```
 
 # Analysis
 ##Survival
-###Effect of RV size only
+###Effect of pruning in the entire cohort - Kaplan Meier
+```{r pruning survival, fig.align='left', fig.height=10, fig.width=10}
+KMPrune.allRV <- survfit(Surv(years_mortality, vital_status) ~ arterial_prune, data=RV_proc)
+KMPrune.allRV.p = as.matrix(surv_pvalue(KMPrune.allRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+surv.km.prune.allRV <- ggsurvplot(KMPrune.allRV, data=RV_proc, risk.table = TRUE, 
+                                  pval = TRUE, conf.int = TRUE, 
+                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.14,0.35), legend.title="Pruning",
+                            legend.labs=c("No Pruning","Pruning"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Survival by Pruning in the Entire Cohort",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+surv.km.prune.allRV
+```
+
+###Effect of pruning in the entire cohort - Cox
+```{r pruning survival cox}
+# univariate
+cox_prune_all_RV_uni <- coxph(Surv(years_mortality, vital_status) ~ arterial_bv5, data=RV_proc)
+cox_prune_all_RV_uni_table <- cbind(exp(-coef(cox_prune_all_RV_uni)[1]),
+                                      exp(-confint(cox_prune_all_RV_uni)[1,2]),
+                                      exp(-confint(cox_prune_all_RV_uni)[1,1]),
+                                      (summary(cox_prune_all_RV_uni)[[7]][1,5]))
+
+
+# multivariable
+cox_prune_all_RV_multi <- coxph(Surv(years_mortality, vital_status) ~ arterial_bv5 +
+                                  age_enroll + gender + race + bmi + fev1pp_utah + pct_emph_slicer + smok_cig_now + ats_pack_years + ccenter, data=RV_clin)
+cox_prune_all_RV_multi_table <- cbind(exp(-coef(cox_prune_all_RV_multi)[1]),
+                                      exp(-confint(cox_prune_all_RV_multi)[1,2]),
+                                      exp(-confint(cox_prune_all_RV_multi)[1,1]),
+                                      (summary(cox_prune_all_RV_multi)[[7]][1,5]))
+
+# table with both univariate and multivariable
+cox_prune_all_RV_both_table <- rbind(cox_prune_all_RV_uni_table,cox_prune_all_RV_multi_table)
+row.names(cox_prune_all_RV_both_table) <- c("Univariate","Multivariable")
+kable(cox_prune_all_RV_both_table,
+      row.names = TRUE,
+      col.names = c("Hazard Ratio","Lower Limit","Upper Limit","p"),
+      align="c",digits=c(3,3,3,7)) %>% 
+  add_header_above(c(" "=2,"Confidence Interval"=2," "=1)) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F) %>% 
+  footnote(number=c("Hazard Ratio Expressed per 1mL decrease in BV5 in the entire cohort",
+                    "Multivarible analysis adjusted for age, sex, race, smoking status, pack years, BMI, FEV1%, LAA% and clinical center"))
+```
+
+###Effect of pruning in the subgroups with and without big right ventricles - Kaplan Meier
+```{r pruning survival large rv, fig.align='left', fig.height=10, fig.width=10}
+KMPrune.bigRV <- survfit(Surv(years_mortality, vital_status) ~ arterial_prune, data=filter(RV_proc,RV_vol==1))
+KMPrune.bigRV.p = as.matrix(surv_pvalue(KMPrune.bigRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+surv.km.prune.bigRV <- ggsurvplot(KMPrune.bigRV, data=filter(RV_proc,RV_vol==1), risk.table = TRUE, 
+                                  pval = TRUE, conf.int = TRUE, 
+                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.14,0.35), legend.title="Pruning",
+                            legend.labs=c("No Pruning","Pruning"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Survival by Pruning in those with Large Right Ventricles",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+```
+
+```{r pruning survival other rv, fig.align='left', fig.height=10, fig.width=10}
+KMPrune.otherRV <- survfit(Surv(years_mortality, vital_status) ~ arterial_prune, data=filter(RV_proc,RV_vol==0))
+KMPrune.otherRV.p = as.matrix(surv_pvalue(KMPrune.otherRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
+surv.km.prune.otherRV <- ggsurvplot(KMPrune.otherRV, data=filter(RV_proc,RV_vol==0), risk.table = TRUE, 
+                                  pval = TRUE, conf.int = TRUE, 
+                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
+                            legend = c(0.14,0.35), legend.title="Pruning",
+                            legend.labs=c("No Pruning","Pruning"),
+                            risk.table.height = 0.2,
+                            palette=c("#E7B800", "#2E9FDF"),
+                            title="Survival by Pruning in those without Large Right Ventricles",
+                            font.legend=c(14), font.title=c(20, "bold"),
+                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
+                            xlab="Years")
+```
+
+```{r fig.align='left', fig.height=10, fig.width=20}
+# plot
+rv.plots <- list(surv.km.prune.bigRV, surv.km.prune.otherRV)
+
+# Arrange multiple ggsurvplots and print the output
+arrange_ggsurvplots(rv.plots, print = TRUE, ncol = 2, nrow = 1)
+```
+
+
+###Effect of RV size only - Kaplan Meier
 
 ```{r rv survival, fig.align='left', fig.height=10, fig.width=10}
-KMRV <- survfit(Surv(days_followed, vital_status) ~ RV_vol, data=RV_proc)
+KMRV <- survfit(Surv(years_mortality, vital_status) ~ RV_vol, data=RV_proc)
 surv.km.RV <- ggsurvplot(KMRV, data=RV_proc, risk.table = TRUE, pval = TRUE,
                             conf.int = TRUE, 
                             risk.table.y.text.col = T, risk.table.y.text = TRUE, 
@@ -75,33 +210,41 @@ surv.km.RV
 KMRV.p = as.matrix(surv_pvalue(KMRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
 ```
 
-Note that p value for RV volume alone is `r KMRV.p`
+###Effect of RV size only - Cox
+```{r rv survival cox}
+# univariate
+cox_RV_uni <- coxph(Surv(years_mortality, vital_status) ~ RV_EPI_Volume, data=RV_proc)
+cox_RV_uni_table <- cbind(exp(coef(cox_RV_uni)[1]),
+                              exp(confint(cox_RV_uni)[1,1]),
+                              exp(confint(cox_RV_uni)[1,2]),
+                              (summary(cox_RV_uni)[[7]][1,5]))
 
-###Effect of pruning in those with big right ventricles
 
-```{r pruning survival large rv, fig.align='left', fig.height=10, fig.width=10}
-KMPrune.bigRV <- survfit(Surv(days_followed, vital_status) ~ arterial_prune, data=filter(RV_proc,RV_vol==1))
-KMPrune.bigRV.p = as.matrix(surv_pvalue(KMPrune.bigRV, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
-surv.km.prune.bigRV <- ggsurvplot(KMPrune.bigRV, data=filter(RV_proc,RV_vol==1), risk.table = TRUE, 
-                                  pval = TRUE, conf.int = TRUE, 
-                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
-                            legend = c(0.14,0.35), legend.title="Pruning",
-                            legend.labs=c("No Pruning","Pruning"),
-                            risk.table.height = 0.2,
-                            palette=c("#E7B800", "#2E9FDF"),
-                            title="Survival by Pruning in those with Large Right Ventricles",
-                            font.legend=c(14), font.title=c(20, "bold"),
-                            font.x=c(14), font.y=c(14), font.tickslab=c(14),
-                            xlab="Years")
-surv.km.prune.bigRV
+# multivariable
+cox_RV_multi <- coxph(Surv(years_mortality, vital_status) ~ RV_EPI_Volume +
+                                  age_enroll + gender + race + bmi + fev1pp_utah + pct_emph_slicer + smok_cig_now + ats_pack_years + ccenter, data=RV_clin)
+cox_RV_multi_table <- cbind(exp(coef(cox_RV_multi)[1]),
+                            exp(confint(cox_RV_multi)[1,1]),
+                            exp(confint(cox_RV_multi)[1,2]),
+                            (summary(cox_RV_multi)[[7]][1,5]))
+
+# table with both univariate and multivariable
+cox_RV_both_table <- rbind(cox_RV_uni_table,cox_RV_multi_table)
+row.names(cox_RV_both_table) <- c("Univariate","Multivariable")
+kable(cox_RV_both_table,
+      row.names = TRUE,
+      col.names = c("Hazard Ratio","Lower Limit","Upper Limit","p"),
+      align="c",digits=c(3,3,3,8)) %>% 
+  add_header_above(c(" "=2,"Confidence Interval"=2," "=1)) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F) %>% 
+  footnote(number=c("Hazard Ratio Expressed per 1mL Increase in right rentricular volume in the Entire Cohort",
+                    "Multivarible analysis adjusted for age, sex, race, BMI, smoking status, pack years, FEV1%, LAA% and clinical center"))
 ```
-Note that p value for pruning in those with a large RV is `r KMPrune.bigRV.p`
 
-###Effect of right ventricular size in those with and without pruning
-
+###Effect of right ventricular size in the subgroups with and without pruning - Kaplan Meier
 ```{r rv by pruning survival, fig.align='left', fig.height=10, fig.width=20}
 # in those without pruning
-KMRV.noprune <- survfit(Surv(days_followed, vital_status) ~ RV_vol, data=filter(RV_proc,arterial_prune==0))
+KMRV.noprune <- survfit(Surv(years_mortality, vital_status) ~ RV_vol, data=filter(RV_proc,arterial_prune==0))
 surv.km.RV.noprune <- ggsurvplot(KMRV.noprune, data=filter(RV_proc,arterial_prune==0), 
                                  risk.table = TRUE, pval = TRUE, conf.int = TRUE, 
                                  risk.table.y.text.col = T, risk.table.y.text = TRUE, 
@@ -116,7 +259,7 @@ surv.km.RV.noprune <- ggsurvplot(KMRV.noprune, data=filter(RV_proc,arterial_prun
 KMRV.noprune.p = as.matrix(surv_pvalue(KMRV.noprune, method = "survdiff", test.for.trend = FALSE, combine = FALSE)[,2])
 
 # in those with purning
-KMRV.prune <- survfit(Surv(days_followed, vital_status) ~ RV_vol, data=filter(RV_proc,arterial_prune==1))
+KMRV.prune <- survfit(Surv(years_mortality, vital_status) ~ RV_vol, data=filter(RV_proc,arterial_prune==1))
 surv.km.RV.prune <- ggsurvplot(KMRV.prune, data=filter(RV_proc,arterial_prune==1), risk.table = TRUE, 
                                   pval = TRUE, conf.int = TRUE, 
                                   risk.table.y.text.col = T, risk.table.y.text = TRUE, 
@@ -136,4 +279,102 @@ prune.plots <- list(surv.km.RV.noprune, surv.km.RV.prune)
 # Arrange multiple ggsurvplots and print the output
 arrange_ggsurvplots(prune.plots, print = TRUE, ncol = 2, nrow = 1)
 ```
-Note that p value for right ventricular volume in those without purning is `r KMRV.noprune.p` and in those with pruning is `r KMRV.prune.p`
+
+## Exacerbations
+### Pruning
+```{r pruning_exacerbations}
+### multivariable zero inflated negative binomial regression
+# entire cohort
+rv_clin_lfu <- rv_clin_lfu %>% 
+  mutate(lyears = ifelse(years_followed>0, log(years_followed), 0)) %>% 
+  filter(years_followed > 0)
+
+rate_exac_multi_pruning_all <- zeroinfl(total_exacerbations ~ arterial_prune + age_enroll + gender + race + smok_cig_now + bmi + ats_pack_years +
+                              fev1pp_utah + priorexacerbation + sgrq_score_total + pct_emph_slicer + gastro_esoph_reflx, data=rv_clin_lfu, 
+                              dist="negbin", offset=lyears, EM=TRUE)
+
+rate_exac_multi_pruning_all_table <- cbind(exp(summary(rate_exac_multi_pruning_all)[[1]][[1]][2,1]), 
+                                           exp(confint(rate_exac_multi_pruning_all)[2,1]),
+                                           exp(confint(rate_exac_multi_pruning_all)[2,2]),
+                                           (summary(rate_exac_multi_pruning_all)[[1]][[1]][2,4]))
+
+# those with RV enlargement (top quartile)
+rate_exac_multi_pruning_RVlarge <- zeroinfl(total_exacerbations ~ arterial_prune + age_enroll + gender + race + smok_cig_now + bmi + ats_pack_years +
+                              fev1pp_utah + priorexacerbation + sgrq_score_total + pct_emph_slicer + gastro_esoph_reflx, data=filter(rv_clin_lfu,RV_vol==1), 
+                              dist="negbin", offset=lyears, EM=TRUE)
+
+rate_exac_multi_pruning_RVlarge_table <- cbind(exp(summary(rate_exac_multi_pruning_RVlarge)[[1]][[1]][2,1]), 
+                                           exp(confint(rate_exac_multi_pruning_RVlarge)[2,1]),
+                                           exp(confint(rate_exac_multi_pruning_RVlarge)[2,2]),
+                                           (summary(rate_exac_multi_pruning_RVlarge)[[1]][[1]][2,4]))
+
+# those without RV enlargement
+rate_exac_multi_pruning_RVother <- zeroinfl(total_exacerbations ~ arterial_prune + age_enroll + gender + race + smok_cig_now + bmi + ats_pack_years +
+                              fev1pp_utah + priorexacerbation + sgrq_score_total + pct_emph_slicer + gastro_esoph_reflx, data=filter(rv_clin_lfu,RV_vol==0), 
+                              dist="negbin", offset=lyears, EM=TRUE)
+
+rate_exac_multi_pruning_RVother_table <- cbind(exp(summary(rate_exac_multi_pruning_RVother)[[1]][[1]][2,1]), # note reversal for low versus high BV5
+                                           exp(confint(rate_exac_multi_pruning_RVother)[2,1]),
+                                           exp(confint(rate_exac_multi_pruning_RVother)[2,2]),
+                                           (summary(rate_exac_multi_pruning_RVother)[[1]][[1]][2,4]))
+
+rate_exac_multi_pruning_table <- rbind(rate_exac_multi_pruning_all_table,rate_exac_multi_pruning_RVlarge_table,rate_exac_multi_pruning_RVother_table)
+row.names(rate_exac_multi_pruning_table) <- c("Entire Cohort","Enlarged Right Ventricle","Non-enlarged Right Ventricle")
+kable(rate_exac_multi_pruning_table,
+      row.names = TRUE,
+      col.names = c("Incidence Rate Ratio","Lower Limit","Upper Limit","p"),
+      align="c",digits=c(2,2,2,3)) %>% 
+  add_header_above(c(" "=2,"Confidence Interval"=2," "=1)) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F) %>% 
+  footnote(number=c("Incidence rate ratio expressed as those with more pruning compared to those with less pruning (low BV5 versus high BV5 dichotmoized at median)",
+                    "Multivarible analysis adjusted for age, sex, race, BMI, current smoking status, pack years, FEV1%, LAA%, SGRQ score, history of GERD and history of exacerbation in the year prior to enrollment"))
+```
+
+### Right Ventricular Volume
+```{r rv_exacerbations}
+### multivariable zero inflated negative binomial regression
+# entire cohort
+rate_exac_multi_rv_all <- zeroinfl(total_exacerbations ~ RV_vol + age_enroll + gender + race + smok_cig_now + bmi + ats_pack_years +
+                              fev1pp_utah + priorexacerbation + sgrq_score_total + pct_emph_slicer + gastro_esoph_reflx, 
+                              data=rv_clin_lfu, 
+                              dist="negbin", offset=lyears, EM=TRUE)
+
+rate_exac_multi_rv_all_table <- cbind(exp(summary(rate_exac_multi_rv_all)[[1]][[1]][2,1]), 
+                                           exp(confint(rate_exac_multi_rv_all)[2,1]),
+                                           exp(confint(rate_exac_multi_rv_all)[2,2]),
+                                           (summary(rate_exac_multi_rv_all)[[1]][[1]][2,4]))
+
+# those with pruning
+rate_exac_multi_rv_withprune <- zeroinfl(total_exacerbations ~ RV_vol + age_enroll + gender + race + smok_cig_now + bmi + ats_pack_years +
+                              fev1pp_utah + priorexacerbation + sgrq_score_total + pct_emph_slicer + gastro_esoph_reflx, 
+                              data=filter(rv_clin_lfu,arterial_prune==1), 
+                              dist="negbin", offset=lyears, EM=TRUE)
+
+rate_exac_multi_rv_withprune_table <- cbind(exp(summary(rate_exac_multi_rv_withprune)[[1]][[1]][2,1]), 
+                                           exp(confint(rate_exac_multi_rv_withprune)[2,1]),
+                                           exp(confint(rate_exac_multi_rv_withprune)[2,2]),
+                                           (summary(rate_exac_multi_rv_withprune)[[1]][[1]][2,4]))
+
+
+# those without pruning
+rate_exac_multi_rv_noprune <- zeroinfl(total_exacerbations ~ RV_vol + age_enroll + gender + race + smok_cig_now + bmi + ats_pack_years +
+                              fev1pp_utah + priorexacerbation + sgrq_score_total + pct_emph_slicer + gastro_esoph_reflx, 
+                              data=filter(rv_clin_lfu,arterial_prune==0), 
+                              dist="negbin", offset=lyears, EM=TRUE)
+
+rate_exac_multi_rv_noprune_table <- cbind(exp(summary(rate_exac_multi_rv_noprune)[[1]][[1]][2,1]), 
+                                           exp(confint(rate_exac_multi_rv_noprune)[2,1]),
+                                           exp(confint(rate_exac_multi_rv_noprune)[2,2]),
+                                           (summary(rate_exac_multi_rv_noprune)[[1]][[1]][2,4]))
+
+rate_exac_multi_rv_table <- rbind(rate_exac_multi_rv_all_table,rate_exac_multi_rv_withprune_table,rate_exac_multi_rv_noprune_table)
+row.names(rate_exac_multi_rv_table) <- c("Entire Cohort","Those with Pruning","Those without Pruning")
+kable(rate_exac_multi_rv_table,
+      row.names = TRUE,
+      col.names = c("Incidence Rate Ratio","Lower Limit","Upper Limit","p"),
+      align="c",digits=c(2,2,2,3)) %>% 
+  add_header_above(c(" "=2,"Confidence Interval"=2," "=1)) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = F) %>% 
+  footnote(number=c("Incidence rate ratio expressed as those with large right ventricle compared to those with small right ventricle dichtomized at 75th percentile",
+                    "Multivarible analysis adjusted for age, sex, race, BMI, current smoking status, pack years, FEV1%, LAA%, SGRQ score, history of GERD and history of exacerbation in the year prior to enrollment"))
+```
