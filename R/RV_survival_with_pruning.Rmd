@@ -237,7 +237,7 @@ kable(cox_RV_both_table,
       align="c",digits=c(3,3,3,8)) %>% 
   add_header_above(c(" "=2,"Confidence Interval"=2," "=1)) %>% 
   kable_styling(bootstrap_options = "striped", full_width = F) %>% 
-  footnote(number=c("Hazard Ratio Expressed per 1mL Increase in right rentricular volume in the Entire Cohort",
+  footnote(number=c("Hazard Ratio Expressed per 1mL Increase in right ventricular volume in the Entire Cohort",
                     "Multivarible analysis adjusted for age, sex, race, BMI, smoking status, pack years, FEV1%, LAA% and clinical center"))
 ```
 
