@@ -30,6 +30,10 @@ Mortality and exacerbation analyses including stratified by right ventricular vo
 9. broman (with addition of myround2 by Karl Broman) 
 10. pscl
 11. MASS
+12. plotly
+13. rgl
+14. scatterplot3d
+15. car
 
 ```{r load_libs}
 library(tidyverse)
@@ -43,6 +47,10 @@ library(kableExtra)
 library(broman)
 library(pscl)
 library(MASS)
+library(plotly)
+library(rgl)
+library(scatterplot3d)
+library(car)
 ```
 
 ```{r}
@@ -252,7 +260,7 @@ surv.km.RV.noprune <- ggsurvplot(KMRV.noprune, data=filter(RV_proc,arterial_prun
                             legend.labs=c("Small Right Ventricle","Large Right Ventricle"),
                             risk.table.height = 0.2,
                             palette=c("#E7B800", "#2E9FDF"),
-                            title="Those without Arterial Pruning",
+                            title="Survivial by Right Ventricular Size in those without Arterial Pruning",
                             font.legend=c(14), font.title=c(20, "bold"),
                             font.x=c(14), font.y=c(14), font.tickslab=c(14),
                             xlab="Years")
@@ -267,7 +275,7 @@ surv.km.RV.prune <- ggsurvplot(KMRV.prune, data=filter(RV_proc,arterial_prune==1
                             legend.labs=c("Small Right Ventricle","Large Right Ventricle"),
                             risk.table.height = 0.2,
                             palette=c("#E7B800", "#2E9FDF"),
-                            title="Those with Arterial Pruning",
+                            title="Survival by Right Ventricular Size in those with Arterial Pruning",
                             font.legend=c(14), font.title=c(20, "bold"),
                             font.x=c(14), font.y=c(14), font.tickslab=c(14),
                             xlab="Years")
@@ -279,6 +287,16 @@ prune.plots <- list(surv.km.RV.noprune, surv.km.RV.prune)
 # Arrange multiple ggsurvplots and print the output
 arrange_ggsurvplots(prune.plots, print = TRUE, ncol = 2, nrow = 1)
 ```
+
+### Combined Figure for Mortality
+```{r fig.height=10, fig.width=15}
+# plot
+prune.rv.plots <- list(surv.km.prune.bigRV, surv.km.prune.otherRV,surv.km.RV.noprune, surv.km.RV.prune)
+
+# Arrange multiple ggsurvplots and print the output
+arrange_ggsurvplots(prune.rv.plots, print = TRUE, ncol = 2, nrow = 2)
+```
+
 
 ## Exacerbations
 ### Pruning
@@ -378,3 +396,37 @@ kable(rate_exac_multi_rv_table,
   footnote(number=c("Incidence rate ratio expressed as those with large right ventricle compared to those with small right ventricle dichtomized at 75th percentile",
                     "Multivarible analysis adjusted for age, sex, race, BMI, current smoking status, pack years, FEV1%, LAA%, SGRQ score, history of GERD and history of exacerbation in the year prior to enrollment"))
 ```
+
+## Relationship between emphysema pruning and RV volume
+```{r}
+RV_clin_plot_nomiss <- RV_clin %>%
+  dplyr::select(RV_EPI_Volume,arterial_bv5,pct_emph_slicer) %>% 
+  drop_na() 
+
+p <- plot_ly(data=RV_clin_plot_nomiss,
+             type='scatter3d',
+             x=RV_clin_plot_nomiss$RV_EPI_Volume,
+             y=RV_clin_plot_nomiss$arterial_bv5,
+             z=RV_clin_plot_nomiss$pct_emph_slicer) 
+p
+
+x=scale(log(RV_clin_plot_nomiss$RV_EPI_Volume))
+y=scale(log(RV_clin_plot_nomiss$arterial_bv5))
+z=scale(log(RV_clin_plot_nomiss$pct_emph_slicer))
+
+scatter3d(x=x,y=y,z=z,
+          xlab="Epicardial Volume",
+          ylab="Arterial BV5",
+          zlab="Low Attenuation Area %",
+          surface.col = "red",
+          point.col="pink",
+          neg.res.col = "pink",
+          pos.res.col = "pink",
+          surface=TRUE,
+          surface.alpha = 0.8,
+          axis.col=c("black","black","black"),
+          fill=TRUE,
+          fit="smooth",
+          grid=FALSE)
+```
+
